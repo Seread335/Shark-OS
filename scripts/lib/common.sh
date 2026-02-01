@@ -3,6 +3,7 @@
 # Usage: source this file near script top to import logging, strict-mode and helpers
 
 set -eEuo pipefail
+rc=0
 trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]} failed at line ${LINENO} with status ${rc}" >&2; exit ${rc}' ERR
 
 # Logging helpers

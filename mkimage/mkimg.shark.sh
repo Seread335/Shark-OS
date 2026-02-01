@@ -11,6 +11,7 @@ if [ -f "$PROJECT_ROOT/scripts/lib/common.sh" ]; then
 else
     # Fallback strict-mode if common helpers not present
     set -eEuo pipefail
+    rc=0
     trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]} failed at line ${LINENO} with status ${rc}" >&2; exit ${rc}' ERR
 fi
 

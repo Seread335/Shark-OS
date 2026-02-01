@@ -3,6 +3,7 @@
 # Run workloads (k3s/podman) on a runner with AppArmor enabled, collect denials and run aa-logprof suggestions
 
 set -eEuo pipefail
+rc=0
 trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]} failed at line ${LINENO} with status ${rc}" >&2; exit ${rc}' ERR
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

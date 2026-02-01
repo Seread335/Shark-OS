@@ -2,6 +2,7 @@
 # scripts/security/check-apparmor.sh - Validate AppArmor profiles are syntactically OK and (optionally) loadable
 
 set -eEuo pipefail
+rc=0
 trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]} failed at line ${LINENO} with status ${rc}" >&2; exit ${rc}' ERR
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
