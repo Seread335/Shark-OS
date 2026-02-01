@@ -48,7 +48,7 @@ run_test "Kubernetes status (should skip if k3s not installed)" $SHARK kubernete
 
 # --- Negative tests ---
 # Config with invalid YAML (expect failure)
-if $SHARK config show --config ../docs/invalid-config.yml >/dev/null 2>&1; then
+if "$SHARK" config show --config ../docs/invalid-config.yml >/dev/null 2>&1; then
     log_result FAIL "Config with invalid YAML (should fail)"
     fail=$((fail+1))
 else
@@ -57,7 +57,7 @@ else
 fi
 
 # Auth with wrong token (expect failure)
-if bash -c 'SHARK_AUTH_TOKEN=wrong "$SHARK" update apply <<< "wrongtoken"' >/dev/null 2>&1; then
+if SHARK_AUTH_TOKEN=wrong "$SHARK" update apply <<< "wrongtoken" >/dev/null 2>&1; then
     log_result FAIL "Auth with wrong token (should fail)"
     fail=$((fail+1))
 else
@@ -66,7 +66,7 @@ else
 fi
 
 # Container run with dangerous input (expect failure)
-if bash -c "$SHARK container run 'alpine; rm -rf /' <<< \"testtoken\"" >/dev/null 2>&1; then
+if "$SHARK" container run 'alpine; rm -rf /' <<< "testtoken" >/dev/null 2>&1; then
     log_result FAIL "Container run with dangerous input (should fail)"
     fail=$((fail+1))
 else
