@@ -1,0 +1,81 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+Shark OS - Server-oriented Operating System
+Copyright (C) 2024 Shark OS Contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+ADDITIONAL TERMS AND CONDITIONS
+
+### Shark OS Licensing
+
+Shark OS is provided under the GNU General Public License v3.0 (GPLv3).
+
+#### What You Can Do
+- Use Shark OS for any purpose (personal, commercial, etc.)
+- Modify the source code
+- Distribute Shark OS and your modifications
+- Use in proprietary applications (with certain conditions)
+
+#### What You Must Do
+- Include a copy of the GPL license
+- Document changes to the source code
+- Make source code available to users
+- Include copyright notice and license terms
+- Use compatible licenses for derivative works
+
+#### What You Cannot Do
+- Remove or modify copyright notices
+- Hold creators liable
+- Use without following GPL terms
+- Impose additional restrictions on users
+
+### Third-Party Components
+
+Shark OS includes software from:
+- Alpine Linux (GPL, MIT)
+- Linux Kernel (GPL v2)
+- Podman (Apache 2.0)
+- K3s (Apache 2.0)
+- Cilium (Apache 2.0)
+- And many others
+
+Each component retains its original license.
+See LICENSE-THIRD-PARTY for details.
+
+### Enterprise Support
+
+Enterprise support, consulting, and commercial licenses
+are available. Contact: contact@sharkoq.io
+
+### Disclaimer
+
+SHARK OS IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY.
+
+### Full GPL v3 License
+
+For the full text of the GNU General Public License v3.0, visit:
+https://www.gnu.org/licenses/gpl-3.0.html
+
+---
+
+Contributors to Shark OS accept these license terms by submitting
+code, documentation, or other content to the project.

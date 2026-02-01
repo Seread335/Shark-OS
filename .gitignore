@@ -1,0 +1,18 @@
+# Build artifacts
+/dist/
+/build/
+/tmp/shark-build
+*.iso
+*.img
+
+# Editor files
+.vscode/
+*.swp
+*~
+
+# Python caches
+__pycache__/
+.pytest_cache/
+
+# Logs
+*.log

@@ -1,0 +1,39 @@
+# AppArmor profile for podman (starter profile — tune for your environment)
+# Path: /usr/bin/podman
+
+#include <tunables/global>
+#include <abstractions/base>
+
+profile /usr/bin/podman flags=(attach_disconnected,mediate_deleted) {
+  # Executable
+  /usr/bin/podman ixr,
+  /usr/bin/podman-remote ixr,
+  /usr/bin/podman* ixr,
+
+  # Runtime paths and config
+  /etc/containers/** r,
+  /etc/subuid r,
+  /etc/subgid r,
+  /run/containers/** rw,
+  /var/lib/containers/** rwk,
+  /var/run/** rw,
+  /var/log/containers/** rw,
+
+  # Temporary files used by containers
+  owner /tmp/** rw,
+
+  # Networking
+  network inet stream,
+  network inet6 stream,
+  network unix dgram stream,
+
+  # Capabilities required for container management (review privileges)
+  capability net_admin,
+  capability net_raw,
+  capability setuid,
+  capability setgid,
+
+  # Conservative deny
+  deny /proc/*/fd/** w,
+  deny /** wklx,
+}
