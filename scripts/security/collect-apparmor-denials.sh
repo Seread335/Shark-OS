@@ -29,7 +29,7 @@ if command -v k3s >/dev/null 2>&1; then
   # perform a simple k3s check
   kubectl get nodes --no-headers -o wide >/dev/null 2>&1 || true
   # collect logs
-  sudo journalctl -u k3s --no-pager -n 200 > "$OUT_DIR/k3s-journal.log" || true
+  sudo journalctl -u k3s --no-pager -n 200 | sudo tee "$OUT_DIR/k3s-journal.log" > /dev/null || true
 fi
 
 # 2) Run a podman container that exercises common behavior
@@ -39,16 +39,16 @@ if command -v podman >/dev/null 2>&1; then
 fi
 
 # Gather dmesg and audit logs for AppArmor denials
-sudo dmesg | grep -i apparmor > "$OUT_DIR/dmesg-apparmor.log" || true
+sudo dmesg | grep -i apparmor | sudo tee "$OUT_DIR/dmesg-apparmor.log" > /dev/null || true
 if command -v ausearch >/dev/null 2>&1; then
-  sudo ausearch -m apparmor -ts recent > "$OUT_DIR/ausearch-apparmor.log" || true
+  sudo ausearch -m apparmor -ts recent | sudo tee "$OUT_DIR/ausearch-apparmor.log" > /dev/null || true
 fi
 
 # Run aa-logprof to suggest profile tweaks
 if command -v aa-logprof >/dev/null 2>&1; then
   echo "Running aa-logprof in non-interactive mode to collect suggestions..."
   sudo aa-logprof -r >/dev/null 2>&1 || true
-  sudo aa-logprof -q > "$OUT_DIR/aa-logprof-out.txt" || true
+  sudo aa-logprof -q | sudo tee "$OUT_DIR/aa-logprof-out.txt" > /dev/null || true
 else
   echo "aa-logprof not available on runner. Install apparmor-utils to use aa-logprof." >&2
 fi
