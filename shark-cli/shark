@@ -38,11 +38,17 @@ validate_config() {
         log_warn "Python3 không có sẵn, không thể kiểm tra cú pháp YAML."
         return 0
     fi
+    # If PyYAML is not installed, skip strict validation
+    if ! python3 -c 'import yaml' 2>/dev/null; then
+        log_warn "Python 'yaml' module not available; skipping YAML syntax validation."
+        return 0
+    fi
     if [ ! -f "$config_file" ]; then
         log_error "Không tìm thấy file cấu hình: $config_file"
         exit 1
     fi
-    python3 -c "import sys, yaml; yaml.safe_load(sys.stdin)" < "$config_file" 2>/dev/null
+    # Support files with multiple YAML documents (e.g., with '---' separators)
+    python3 -c "import sys, yaml; list(yaml.safe_load_all(sys.stdin))" < "$config_file" 2>/dev/null
     if [ $? -ne 0 ]; then
         log_error "Cấu hình $config_file không hợp lệ (YAML syntax error). Hãy kiểm tra lại!"
         exit 1
@@ -93,7 +99,7 @@ log_to_file() {
     local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [$level] $*"
     if [ -n "$SHARK_LOG_FILE" ]; then
         # Try to append to log file, ignore error if no permission
-        echo "$msg" >> "$SHARK_LOG_FILE" 2>/dev/null || true
+        ( echo "$msg" >> "$SHARK_LOG_FILE" ) 2>/dev/null || true
     fi
 }
 log_info() {
@@ -164,22 +170,38 @@ check_permission() {
 
 require_auth() {
     local token_input=""
-    # 1) If token available in env, accept (useful for automation/tests)
+    # 1) If token available in env, use it and try to resolve role from tokens file if present
     if [ -n "${SHARK_AUTH_TOKEN:-}" ]; then
-        SHARK_AUTH_ROLE="${SHARK_AUTH_ROLE:-admin}"
+        if [ -f "$AUTH_TOKEN_FILE" ]; then
+            role=$(read_token_role "$SHARK_AUTH_TOKEN") || true
+            if [ -n "$role" ]; then
+                SHARK_AUTH_ROLE="$role"
+            else
+                SHARK_AUTH_ROLE="${SHARK_AUTH_ROLE:-admin}"
+            fi
+        else
+            SHARK_AUTH_ROLE="${SHARK_AUTH_ROLE:-admin}"
+        fi
         SHARK_AUTH_ID="${SHARK_AUTH_TOKEN:0:8}"
         return 0
     fi
+
     # 2) Try secrets.env
     if [ -f "/etc/shark/secrets.env" ]; then
         # shellcheck disable=SC1090
         . /etc/shark/secrets.env
         if [ -n "${SHARK_AUTH_TOKEN:-}" ]; then
-            SHARK_AUTH_ROLE="${SHARK_AUTH_ROLE:-admin}"
+            if [ -f "$AUTH_TOKEN_FILE" ]; then
+                role=$(read_token_role "$SHARK_AUTH_TOKEN") || true
+                SHARK_AUTH_ROLE="${role:-admin}"
+            else
+                SHARK_AUTH_ROLE="${SHARK_AUTH_ROLE:-admin}"
+            fi
             SHARK_AUTH_ID="${SHARK_AUTH_TOKEN:0:8}"
             return 0
         fi
     fi
+
     # 3) Read token from stdin if provided (non-interactive)
     if token_input=$(head -n1 /dev/stdin 2>/dev/null || true); then
         :
@@ -192,6 +214,7 @@ require_auth() {
             return 0
         fi
     fi
+
     # 4) interactive prompt fallback
     echo -n "Enter authentication token: "
     read -r -s token_input || true
@@ -259,7 +282,7 @@ cmd_status() {
     # Disk
     echo ""
     echo "Disk Usage:"
-    df -h / /var/lib/shark 2>/dev/null | column -t
+    df -h / /var/lib/shark 2>/dev/null | column -t || true
     
     # Container Runtime
     echo ""
@@ -293,7 +316,7 @@ cmd_update() {
             echo "Status: ${YELLOW}Not yet implemented in alpha${NC}"
             echo ""
             echo "Available partitions:"
-            lsblk -o NAME,SIZE,LABEL 2>/dev/null | grep -E 'shark|root'
+            lsblk -o NAME,SIZE,LABEL 2>/dev/null | grep -E 'shark|root' || true
             ;;
         
         check)
@@ -305,8 +328,8 @@ cmd_update() {
         apply)
             require_auth
             check_permission "update.apply"
-            check_root
             audit_log "update.apply" "requested"
+            check_root
             log_warn "Update apply not yet implemented in alpha version"
             log_warn "This will require:"
             log_warn "  1. Download new rootfs image"
@@ -318,8 +341,8 @@ cmd_update() {
         rollback)
             require_auth
             check_permission "update.rollback"
-            check_root
             audit_log "update.rollback" "requested"
+            check_root
             log_warn "Rollback mechanism not yet implemented in alpha version"
             ;;
         
@@ -333,8 +356,34 @@ cmd_update() {
 
 # Command: config
 cmd_config() {
+    # Support inline option: 'shark config show --config <file>' or 'shark config --config <file> show'
+    # Accept '--config <file>' anywhere in the args and remove it from the positional args
+    if printf '%s\n' "$@" | grep -q -- '--config'; then
+        local new_args=()
+        local skip_next=0
+        while [ $# -gt 0 ]; do
+            if [ "$skip_next" -eq 1 ]; then
+                skip_next=0
+                shift
+                continue
+            fi
+            if [ "$1" = "--config" ]; then
+                if [ -n "${2:-}" ]; then
+                    export SHARK_CONFIG="$2"
+                    skip_next=1
+                fi
+                shift
+                continue
+            fi
+            new_args+=("$1")
+            shift
+        done
+        # restore positional args without the --config pair
+        set -- "${new_args[@]:-}"
+    fi
+
     local action="${1:-show}"
-    local key="${2}"
+    local key="${2:-}"
     
     case "$action" in
         show)
@@ -344,8 +393,8 @@ cmd_config() {
                 cat "$SHARK_CONFIG"
             else
                 log_warn "No configuration file found: $SHARK_CONFIG"
-                echo "Creating default configuration..."
-                cmd_config init
+                echo "No configuration file present. To initialize run: sudo shark config init"
+                return 0
             fi
             ;;
         
@@ -440,12 +489,13 @@ EOF
             require_auth
             check_permission "config.set"
             check_root
-            if [ -z "$key" ] || [ -z "$3" ]; then
+            local value="${3:-}"
+            if [ -z "$key" ] || [ -z "$value" ]; then
                 log_error "Usage: shark config set <key> <value>"
                 exit 1
             fi
             log_warn "config set not yet implemented"
-            audit_log "config.set" "$key=$3"
+            audit_log "config.set" "$key=$value"
             ;;
         
         *)
@@ -498,7 +548,7 @@ cmd_system() {
 
 # Command: service
 cmd_service() {
-    local service="${1}"
+    local service="${1:-}"
     local action="${2:-status}"
     
     if [ -z "$service" ]; then
@@ -532,19 +582,31 @@ cmd_service() {
 
 # Command: container
 cmd_container() {
-    local action="${1}"
+    local action="${1:-}"
     
     case "$action" in
         list)
-            podman ps -a
+            if command -v podman &>/dev/null; then
+                podman ps -a || true
+            else
+                echo "  Not installed"
+            fi
             ;;
         
         images)
-            podman images
+            if command -v podman &>/dev/null; then
+                podman images || true
+            else
+                echo "  Not installed"
+            fi
             ;;
         
         ps)
-            podman ps
+            if command -v podman &>/dev/null; then
+                podman ps || true
+            else
+                echo "  Not installed"
+            fi
             ;;
         
         run)
@@ -578,8 +640,8 @@ cmd_kubernetes() {
     local action="${1}"
     
     if ! command -v k3s &>/dev/null; then
-        log_error "Kubernetes not installed on this system"
-        exit 1
+        echo "  Not installed"
+        return 0
     fi
     
     case "$action" in

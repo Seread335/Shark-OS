@@ -1,0 +1,8 @@
+# Intentional invalid YAML for tests
+version: "0.1"
+network:
+  interfaces:
+    eth0:
+      dhcp: true
+  # malformed list below (missing closing bracket)
+  invalid_list: [1, 2, 3
