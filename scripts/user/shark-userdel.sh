@@ -33,7 +33,7 @@ if ! id "$USERNAME" &>/dev/null; then
   exit 3
 fi
 
-read -p "Are you sure you want to delete user $USERNAME? [y/N]: " CONFIRM
+read -r -p "Are you sure you want to delete user $USERNAME? [y/N]: " CONFIRM
 if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
   echo "Aborted."
   exit 0
