@@ -17,7 +17,7 @@ fi
 run_shellcheck() {
   if command -v shellcheck >/dev/null 2>&1; then
     echo "Using local shellcheck"
-    find . -name '*.sh' -type f -print0 | xargs -0 shellcheck --external-sources --format=gcc
+    find . -name '*.sh' -type f -print0 | xargs -0 shellcheck -x --external-sources --format=gcc
   elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     echo "Using Docker shellcheck image"
     docker run --rm -v "${PWD}:/mnt" koalaman/shellcheck:stable sh -c "find /mnt -name '*.sh' -type f -print0 | xargs -0 shellcheck --external-sources --format=gcc"
