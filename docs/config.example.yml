@@ -1,0 +1,257 @@
+# Shark OS - Default Configuration
+# Format: YAML
+# Location: /etc/shark/config.yml
+
+version: "0.1"
+
+# System identification
+hostname: "shark-os"
+domain: "local"
+description: "Shark OS System"
+
+# Network configuration
+network:
+  # Hostname
+  hostname: "shark-os"
+  
+  # Primary interface (eth0)
+  interfaces:
+    eth0:
+      # DHCP mode (default)
+      dhcp: true
+      
+      # Or static configuration
+      # comment out dhcp and use these:
+      # address: 192.168.1.10
+      # netmask: 255.255.255.0
+      # gateway: 192.168.1.1
+  
+  # DNS configuration
+  dns:
+    primary: 8.8.8.8
+    secondary: 8.8.4.4
+  
+  # NTP servers
+  ntp:
+    - pool.ntp.org
+    - time.google.com
+
+# Container runtime configuration
+container:
+  runtime: "podman"
+  storage_driver: "overlay2"
+  storage_path: "/var/lib/containers"
+  log_driver: "journald"
+  
+  # Podman networking
+  network:
+    bridge: "cni0"
+    subnet: "10.88.0.0/16"
+
+# Kubernetes / K3s configuration
+kubernetes:
+  enabled: false
+  flavor: "k3s"
+  
+  # Cluster configuration
+  cluster:
+    name: "shark-cluster"
+    node_name: "shark-01"
+    
+    # API server bind address
+    bind_address: "0.0.0.0"
+    bind_port: 6443
+    
+    # Network
+    cluster_cidr: "10.42.0.0/16"
+    service_cidr: "10.43.0.0/16"
+  
+  # CNI plugin (Container Network Interface)
+  cni: "cilium"
+  
+  # eBPF settings for Cilium
+  ebpf:
+    enabled: true
+    jit: true
+
+# Security configuration
+security:
+  # Firewall
+  firewall: "nftables"
+  firewall_enabled: true
+  
+  # AppArmor mandatory access control
+  apparmor: true
+  apparmor_mode: "enforce"
+  
+  # SELinux (disabled on Alpine)
+  selinux: false
+  
+  # SSH daemon
+  ssh:
+    enabled: true
+    port: 22
+    permit_root_login: false
+    password_auth: true
+    pubkey_auth: true
+  
+  # Audit daemon
+  audit: true
+
+# Monitoring and observability
+monitoring:
+  # Node Exporter (Prometheus metrics)
+  node_exporter: true
+  node_exporter_port: 9100
+  
+  # Prometheus (optional)
+  prometheus: false
+  prometheus_port: 9090
+  
+  # Grafana (optional)
+  grafana: false
+  grafana_port: 3000
+
+# Storage configuration
+storage:
+  # Root filesystem type
+  root_filesystem: "ext4"
+  
+  # Data partition location
+  data_partition: "/var/lib/shark"
+  
+  # ZFS support
+  enable_zfs: false
+  
+  # LVM support
+  enable_lvm: true
+
+# System tuning and kernel parameters
+tuning:
+  # File descriptor limits
+  max_open_files: 1048576
+  
+  # Network limits
+  max_connections: 65535
+  tcp_backlog: 10000
+  
+  # Memory swappiness (0-100, lower = less swap)
+  swappiness: 10
+  
+  # VM dirty pages (for I/O tuning)
+  dirty_ratio: 10
+  dirty_background_ratio: 5
+
+# Logging configuration
+logging:
+  # Journald (systemd journal)
+  journald:
+    enabled: true
+    
+    # Log compression
+    compress: true
+    
+    # Maximum disk usage
+    max_disk_usage: 4G
+    
+    # Forward to syslog
+    forward_to_syslog: false
+  
+  # Loki (for distributed logging, Enterprise tier)
+  loki:
+    enabled: false
+    # loki_endpoint: "http://loki:3100"
+
+# Service configuration
+services:
+  # Services to start on boot
+  auto_start:
+    - networking
+    - ssh
+    - podman
+    - journald
+  
+  # Optional services
+  # Uncomment to enable
+  # - k3s               # Kubernetes
+  # - corosync          # Clustering
+  # - prometheus        # Monitoring
+  # - falco             # Runtime security
+  # - loki              # Distributed logging
+
+# Update configuration
+updates:
+  # A/B partitioning
+  enabled: true
+  
+  # Automatic security updates
+  auto_security_updates: true
+  
+  # Update check schedule (cron format)
+  check_schedule: "0 2 * * *"  # 2 AM daily
+  
+  # Reboot after update
+  auto_reboot: false
+
+# Cluster configuration (for HA setups)
+cluster:
+  enabled: false
+  
+  # Cluster node role
+  role: "worker"  # or "controlplane"
+  
+  # Cluster configuration
+  # config_server: "http://config-server:8080"
+  # cluster_peers:
+  #   - 192.168.1.11
+  #   - 192.168.1.12
+
+# Advanced settings
+advanced:
+  # Debug mode
+  debug: false
+  
+  # Verbose logging
+  verbose: false
+  
+  # Custom kernel parameters
+  kernel_params: []
+  # Example:
+  # - "net.core.rmem_max=134217728"
+  # - "net.core.wmem_max=134217728"
+
+# System limits (resource constraints)
+limits:
+  # CPU cores to use
+  cpu_quota: 0  # 0 = unlimited
+  
+  # Memory limits
+  memory_limit: 0  # 0 = unlimited
+  
+  # Disk I/O limits
+  io_weight: 100  # 1-10000
+
+---
+# Notes:
+# 1. This is the default configuration
+# 2. Edit /etc/shark/config.yml to customize
+# 3. Use `shark config edit` to modify
+# 4. Changes require service restart
+# 5. Backup /etc/shark/config.yml before major changes
+# 6. For production, review security settings
+# 7. Keep this file in version control (without secrets)
+
+# Common Tasks:
+# 
+# Change hostname:
+#   shark config set hostname shark-prod-01
+# 
+# Enable Kubernetes:
+#   shark config set kubernetes.enabled true
+# 
+# Configure static IP:
+#   shark config edit
+#   # Edit network.interfaces.eth0 section
+# 
+# Enable auto-security-updates:
+#   shark config set updates.auto_security_updates true

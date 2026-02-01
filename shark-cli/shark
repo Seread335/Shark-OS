@@ -1,0 +1,699 @@
+#!/bin/bash
+set -eEuo pipefail
+trap 'log_error "Lỗi không mong muốn tại dòng $LINENO. Script dừng."; exit 1' ERR
+
+# Source shared helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -f "$PROJECT_ROOT/scripts/lib/common.sh" ]; then
+    # shellcheck disable=SC1090
+    source "$PROJECT_ROOT/scripts/lib/common.sh"
+else
+    # fallback minimal logger
+    log_info() { echo "[*] $*" >&2; }
+    log_warn() { echo "[!] $*" >&2; }
+    log_error() { echo "[×] $*" >&2; }
+fi
+
+# File-based logging
+log_to_file() {
+    local level="$1"; shift
+    local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [$level] $*"
+    if [ -n "$SHARK_LOG_FILE" ]; then
+        mkdir -p "$(dirname "$SHARK_LOG_FILE")" 2>/dev/null || true
+        echo "$msg" >> "$SHARK_LOG_FILE" 2>/dev/null || true
+    fi
+}
+
+# Override console helpers to also write to log file
+log_info() { printf "%s\n" "$*" >&2; log_to_file INFO "$*"; }
+log_success() { printf "%s\n" "$*" >&2; log_to_file SUCCESS "$*"; }
+log_warn() { printf "%s\n" "$*" >&2; log_to_file WARN "$*"; }
+log_error() { printf "%s\n" "$*" >&2; log_to_file ERROR "$*"; }
+
+# Validate YAML config file
+validate_config() {
+    local config_file="$1"
+    if ! command -v python3 &>/dev/null; then
+        log_warn "Python3 không có sẵn, không thể kiểm tra cú pháp YAML."
+        return 0
+    fi
+    if [ ! -f "$config_file" ]; then
+        log_error "Không tìm thấy file cấu hình: $config_file"
+        exit 1
+    fi
+    python3 -c "import sys, yaml; yaml.safe_load(sys.stdin)" < "$config_file" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        log_error "Cấu hình $config_file không hợp lệ (YAML syntax error). Hãy kiểm tra lại!"
+        exit 1
+    fi
+}
+# Validate arguments for dangerous characters (RCE prevention)
+validate_safe_args() {
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" =~ [;|&><`$\\\(\)] ]]; then
+            log_error "Unsafe character detected in argument: $arg"
+            exit 1
+        fi
+    done
+}
+# shark-cli - Shark OS Command Line Interface
+# Main entry point for system management
+
+
+VERSION="0.1.0"
+RELEASE="alpha"
+SHARK_CONFIG="${SHARK_CONFIG:-/etc/shark/config.yml}"
+SHARK_DATA_DIR="${SHARK_DATA_DIR:-/var/lib/shark}"
+SHARK_CACHE_DIR="${SHARK_CACHE_DIR:-/var/cache/shark}"
+SHARK_LOG_FILE="${SHARK_LOG_FILE:-/var/log/shark-cli.log}"
+
+# Color support
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    BOLD=''
+    NC=''
+fi
+
+# Logging functions (log to file and stderr)
+log_to_file() {
+    local level="$1"; shift
+    local msg="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [$level] $*"
+    if [ -n "$SHARK_LOG_FILE" ]; then
+        # Try to append to log file, ignore error if no permission
+        echo "$msg" >> "$SHARK_LOG_FILE" 2>/dev/null || true
+    fi
+}
+log_info() {
+    echo -e "${GREEN}[*]${NC} $*" >&2
+    log_to_file INFO "$*"
+}
+log_success() {
+    echo -e "${GREEN}[+]${NC} $*" >&2
+    log_to_file SUCCESS "$*"
+}
+log_warn() {
+    echo -e "${YELLOW}[!]${NC} $*" >&2
+    log_to_file WARN "$*"
+}
+log_error() {
+    echo -e "${RED}[×]${NC} $*" >&2
+    log_to_file ERROR "$*"
+}
+log_debug() {
+    if [ "$SHARK_DEBUG" = "1" ]; then
+        echo -e "${BLUE}[D]${NC} $*" >&2
+        log_to_file DEBUG "$*"
+    fi
+}
+
+
+# Secure secrets management: prefer env/file, warn if found in config
+require_auth() {
+    local token_input token_valid secret_file
+    # 1. Check env variable first
+    if [ -n "$SHARK_AUTH_TOKEN" ]; then
+        token_valid="$SHARK_AUTH_TOKEN"
+    else
+        # 2. Check secrets file
+        secret_file="/etc/shark/secrets.env"
+        if [ -f "$secret_file" ]; then
+            # shellcheck disable=SC1090
+            . "$secret_file"
+            if [ -n "$SHARK_AUTH_TOKEN" ]; then
+                token_valid="$SHARK_AUTH_TOKEN"
+            fi
+        fi
+    fi
+    # 3. Check config file (but warn and refuse if found)
+    if [ -z "$token_valid" ] && [ -f "$SHARK_CONFIG" ]; then
+        if grep -qE 'auth_token:|password:|secret:' "$SHARK_CONFIG"; then
+            log_error "Detected secrets in config file ($SHARK_CONFIG). For security, move all secrets to /etc/shark/secrets.env or environment variables."
+            exit 1
+        fi
+    fi
+    if [ -z "$token_valid" ]; then
+        log_error "No authentication token set. Set SHARK_AUTH_TOKEN env or add to /etc/shark/secrets.env."
+        exit 1
+    fi
+    # Prompt for token (no echo)
+    echo -n "Enter authentication token: "
+    read -r -s token_input
+    echo
+    if [ "$token_input" != "$token_valid" ]; then
+        log_error "Authentication failed."
+        exit 1
+    fi
+}
+
+# Check if running as root (needed for some operations)
+check_root() {
+    if [ "$(id -u)" != "0" ]; then
+        log_error "This command requires root privileges"
+        exit 1
+    fi
+}
+
+# Command: version
+cmd_version() {
+    echo "Shark OS CLI v${VERSION}-${RELEASE}"
+    echo "Copyright 2024 Shark OS Contributors"
+}
+
+# Command: status
+cmd_status() {
+    echo "${BOLD}System Status:${NC}"
+    echo ""
+    
+    # OS Info
+    echo "OS Information:"
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "  Name: ${PRETTY_NAME:-Unknown}"
+        echo "  Version: ${VERSION_ID:-Unknown}"
+        echo "  ID: ${ID:-Unknown}"
+    fi
+    
+    # Kernel
+    echo ""
+    echo "Kernel:"
+    uname -sr
+    
+    # Uptime
+    echo ""
+    echo "Uptime:"
+    uptime
+    
+    # Load
+    echo ""
+    echo "System Load:"
+    cat /proc/loadavg
+    
+    # Memory
+    echo ""
+    echo "Memory:"
+    free -h
+    
+    # Disk
+    echo ""
+    echo "Disk Usage:"
+    df -h / /var/lib/shark 2>/dev/null | column -t
+    
+    # Container Runtime
+    echo ""
+    echo "Container Runtime:"
+    if command -v podman &>/dev/null; then
+        podman --version
+    else
+        echo "  Not installed"
+    fi
+    
+    # Kubernetes
+    if command -v k3s &>/dev/null; then
+        echo ""
+        echo "Kubernetes:"
+        k3s --version 2>/dev/null || echo "  Not initialized"
+    fi
+}
+
+# Command: update
+cmd_update() {
+    local action="${1:-info}"
+    
+    case "$action" in
+        info)
+            echo "${BOLD}Update Information:${NC}"
+            echo ""
+            echo "Update Mechanism: A/B Partitioning"
+            echo "Current Boot: $(mount | grep 'on / ' | awk '{print $1}')"
+            echo "Current Version: $(cat /etc/shark/version 2>/dev/null || echo 'Unknown')"
+            echo ""
+            echo "Status: ${YELLOW}Not yet implemented in alpha${NC}"
+            echo ""
+            echo "Available partitions:"
+            lsblk -o NAME,SIZE,LABEL 2>/dev/null | grep -E 'shark|root'
+            ;;
+        
+        check)
+            log_info "Checking for updates..."
+            # TODO: Check remote for updates
+            echo "No updates available"
+            ;;
+        
+        apply)
+            require_auth
+            check_root
+            log_warn "Update apply not yet implemented in alpha version"
+            log_warn "This will require:"
+            log_warn "  1. Download new rootfs image"
+            log_warn "  2. Flash to inactive partition"
+            log_warn "  3. Switch bootloader to inactive partition"
+            log_warn "  4. Reboot and verify"
+            ;;
+        
+        rollback)
+            require_auth
+            check_root
+            log_warn "Rollback mechanism not yet implemented in alpha version"
+            ;;
+        
+        *)
+            log_error "Unknown update action: $action"
+            echo "Usage: shark update [info|check|apply|rollback]"
+            exit 1
+            ;;
+    esac
+}
+
+# Command: config
+cmd_config() {
+    local action="${1:-show}"
+    local key="${2}"
+    
+    case "$action" in
+        show)
+            if [ -f "$SHARK_CONFIG" ]; then
+                validate_config "$SHARK_CONFIG"
+                echo "${BOLD}Current Configuration:${NC}"
+                cat "$SHARK_CONFIG"
+            else
+                log_warn "No configuration file found: $SHARK_CONFIG"
+                echo "Creating default configuration..."
+                cmd_config init
+            fi
+            ;;
+        
+        init)
+            require_auth
+            check_root
+            log_info "Initializing default configuration..."
+            mkdir -p "$(dirname "$SHARK_CONFIG")"
+            cat > "$SHARK_CONFIG" << 'EOF'
+# Shark OS Configuration File
+# Format: YAML
+
+version: "0.1"
+hostname: "shark-os"
+
+# Network configuration
+network:
+  hostname: "shark-os"
+  dns:
+    - "8.8.8.8"
+    - "8.8.4.4"
+  ntp:
+    - "pool.ntp.org"
+
+# Container runtime
+container:
+  runtime: "podman"
+  storage_driver: "overlay2"
+  log_driver: "journald"
+  
+# Kubernetes configuration
+kubernetes:
+  enabled: false
+  flavor: "k3s"
+  cluster_name: "shark-cluster"
+
+# Security
+security:
+  firewall: "nftables"
+  apparmor: true
+  selinux: false
+
+# Monitoring
+monitoring:
+  node_exporter: true
+  metrics_port: 9100
+
+# Storage
+storage:
+  root_filesystem: "ext4"
+  data_partition: "/var/lib/shark"
+  enable_zfs: false
+
+# System tuning
+tuning:
+  max_open_files: 1048576
+  max_connections: 65535
+  swappiness: 10
+EOF
+            log_success "Configuration initialized: $SHARK_CONFIG"
+            ;;
+        
+        edit)
+            require_auth
+            check_root
+            if [ -n "$EDITOR" ]; then
+                $EDITOR "$SHARK_CONFIG"
+            elif command -v nano &>/dev/null; then
+                nano "$SHARK_CONFIG"
+            else
+                log_error "No editor found. Set EDITOR environment variable"
+                exit 1
+            fi
+            ;;
+        
+        get)
+            if [ -z "$key" ]; then
+                log_error "Usage: shark config get <key>"
+                exit 1
+            fi
+            if [ -f "$SHARK_CONFIG" ]; then
+                validate_config "$SHARK_CONFIG"
+                grep "^${key}:" "$SHARK_CONFIG" 2>/dev/null || log_warn "Key not found: $key"
+            fi
+            ;;
+        
+        set)
+            require_auth
+            check_root
+            if [ -z "$key" ] || [ -z "$3" ]; then
+                log_error "Usage: shark config set <key> <value>"
+                exit 1
+            fi
+            log_warn "config set not yet implemented"
+            ;;
+        
+        *)
+            log_error "Unknown config action: $action"
+            echo "Usage: shark config [show|init|edit|get|set]"
+            exit 1
+            ;;
+    esac
+}
+
+# Command: system
+cmd_system() {
+    local action="${1:-info}"
+    
+    case "$action" in
+        reboot)
+            require_auth
+            check_root
+            log_info "Rebooting system..."
+            reboot
+            ;;
+        
+        shutdown)
+            require_auth
+            check_root
+            log_info "Shutting down system..."
+            poweroff
+            ;;
+        
+        halt)
+            require_auth
+            check_root
+            log_info "Halting system..."
+            halt
+            ;;
+        
+        *)
+            log_error "Unknown system action: $action"
+            echo "Usage: shark system [reboot|shutdown|halt]"
+            exit 1
+            ;;
+    esac
+}
+
+# Command: service
+cmd_service() {
+    local service="${1}"
+    local action="${2:-status}"
+    
+    if [ -z "$service" ]; then
+        log_error "Usage: shark service <name> [start|stop|restart|status|enable|disable]"
+        exit 1
+    fi
+    
+    case "$action" in
+        start|stop|restart|status)
+            require_auth
+            check_root
+            rc-service "$service" "$action"
+            ;;
+        
+        enable|disable)
+            require_auth
+            check_root
+            rc-update "$action" "$service"
+            ;;
+        
+        *)
+            log_error "Unknown service action: $action"
+            exit 1
+            ;;
+    esac
+}
+
+# Command: container
+cmd_container() {
+    local action="${1}"
+    
+    case "$action" in
+        list)
+            podman ps -a
+            ;;
+        
+        images)
+            podman images
+            ;;
+        
+        ps)
+            podman ps
+            ;;
+        
+        run)
+            require_auth
+            shift
+            validate_safe_args "$@"
+            podman run "$@"
+            ;;
+        
+        pull)
+            require_auth
+            shift
+            validate_safe_args "$@"
+            podman pull "$@"
+            ;;
+        
+        *)
+            log_error "Unknown container action: $action"
+            echo "Usage: shark container [list|images|ps|run|pull]"
+            exit 1
+            ;;
+    esac
+}
+
+# Command: kubernetes / k8s
+cmd_kubernetes() {
+    local action="${1}"
+    
+    if ! command -v k3s &>/dev/null; then
+        log_error "Kubernetes not installed on this system"
+        exit 1
+    fi
+    
+    case "$action" in
+        init)
+            require_auth
+            check_root
+            log_info "Initializing K3s cluster..."
+            k3s server &
+            sleep 5
+            export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+            kubectl cluster-info
+            ;;
+        
+        stop)
+            require_auth
+            check_root
+            log_info "Stopping K3s cluster..."
+            pkill -f "k3s"
+            ;;
+        
+        status)
+            export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+            kubectl cluster-info
+            kubectl get nodes
+            ;;
+        
+        *)
+            export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+            validate_safe_args "$@"
+            kubectl "$@"
+            ;;
+    esac
+}
+
+# Command: help
+cmd_help() {
+    cat << 'EOF'
+${BOLD}Shark OS CLI v${VERSION}-${RELEASE}${NC}
+
+A command-line interface for managing Shark OS systems.
+
+${BOLD}Usage:${NC}
+  shark [options] <command> [arguments]
+
+${BOLD}Global Options:${NC}
+  -h, --help              Show this help message
+  -v, --version           Show version information
+  --debug                 Enable debug output
+  --config <file>         Use custom config file
+
+${BOLD}Commands:${NC}
+  
+  ${BOLD}version${NC}              Show version information
+  ${BOLD}status${NC}               Display system status
+  
+  ${BOLD}config${NC} <action>       Manage system configuration
+    show                    Display current configuration
+    init                    Initialize default configuration
+    edit                    Edit configuration file
+    get <key>              Get configuration value
+    set <key> <value>      Set configuration value
+  
+  ${BOLD}update${NC} <action>       Manage system updates
+    info                    Show update information (default)
+    check                   Check for available updates
+    apply                   Apply pending updates
+    rollback                Rollback to previous version
+  
+  ${BOLD}system${NC} <action>       System control commands
+    reboot                  Reboot the system
+    shutdown                Shut down the system
+    halt                    Halt the system
+  
+  ${BOLD}service${NC} <name> <action>  Manage OpenRC services
+    start|stop|restart      Control service
+    status                  Show service status
+    enable|disable          Enable/disable on boot
+  
+  ${BOLD}container${NC} <action>    Container management (Podman)
+    list                    List all containers
+    images                  List container images
+    ps                      List running containers
+    run [args]             Run a new container
+    pull <image>           Pull a container image
+  
+  ${BOLD}kubernetes|k8s${NC} <action>  Kubernetes management (K3s)
+    init                    Initialize K3s cluster
+    stop                    Stop K3s cluster
+    status                  Show cluster status
+    <kubectl-cmd>          Pass commands to kubectl
+
+${BOLD}Examples:${NC}
+  shark status                    # Show system status
+  shark config show               # Display configuration
+  shark update info               # Show update info
+  shark service podman start      # Start podman service
+  shark container list            # List containers
+  shark kubernetes status         # Show K8s cluster status
+
+${BOLD}Documentation:${NC}
+  Full documentation: https://github.com/Seread335/Shark-OS/wiki
+  Configuration: /etc/shark/config.yml
+  Data directory: /var/lib/shark
+
+EOF
+}
+
+# Main command dispatcher
+main() {
+    # Parse global options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                cmd_help
+                exit 0
+                ;;
+            -v|--version)
+                cmd_version
+                exit 0
+                ;;
+            --debug)
+                export SHARK_DEBUG=1
+                shift
+                ;;
+            --config)
+                export SHARK_CONFIG="$2"
+                shift 2
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                exit 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    
+    # Get command
+    local cmd="${1:-help}"
+    shift || true
+    
+    log_debug "Command: $cmd"
+    log_debug "Arguments: $@"
+    
+    case "$cmd" in
+        version)
+            cmd_version
+            ;;
+        
+        status)
+            cmd_status "$@"
+            ;;
+        
+        update)
+            cmd_update "$@"
+            ;;
+        
+        config)
+            cmd_config "$@"
+            ;;
+        
+        system)
+            cmd_system "$@"
+            ;;
+        
+        service)
+            cmd_service "$@"
+            ;;
+        
+        container)
+            cmd_container "$@"
+            ;;
+        
+        kubernetes|k8s|k3s)
+            cmd_kubernetes "$@"
+            ;;
+        
+        help)
+            cmd_help
+            ;;
+        
+        *)
+            log_error "Unknown command: $cmd"
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+# Execute main
+main "$@"

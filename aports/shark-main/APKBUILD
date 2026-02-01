@@ -1,0 +1,108 @@
+# Maintainer: Shark OS <dev@sharkoq.io>
+pkgname=shark-linux
+pkgver=6.6.0_shark1
+pkgrel=0
+pkgdesc="Linux Kernel optimized for Shark OS"
+url="https://github.com/Seread335/Shark-OS"
+arch="x86_64 aarch64 armv7"
+license="GPL-2.0-only"
+options="!strip !check"
+makedepends="bash bc bison diffutils elfutils-dev flex gawk gcc musl-dev
+	openssl-dev perl python3 rsync kmod xz"
+
+# Alpine/Shark kernel version
+_kernelver=6.6
+_kver=${_kernelver}.0
+
+# Kernel mirror
+_commit=
+source="
+	linux-${_kver}.tar.xz::https://cdn.kernel.org/pub/linux/kernel/v${_kernelver%.*}.x/linux-${_kver}.tar.xz
+	config-shark-x86_64
+	config-shark-aarch64
+	shark-kernel-patches.tar.gz
+"
+
+builddir="$srcdir/linux-${_kver}"
+
+# Shark-specific kernel options
+_shark_configs="
+	CONFIG_eBPF=y
+	CONFIG_DEBUG_INFO_BTF=y
+	CONFIG_HAVE_EBPF_JIT=y
+	CONFIG_BPF_SYSCALL=y
+	CONFIG_BPF_JIT=y
+	CONFIG_BPF_JIT_ALWAYS_ON=y
+	CONFIG_CGROUP_V2=y
+	CONFIG_CGROUPS=y
+	CONFIG_CGROUP_CPUACCT=y
+	CONFIG_CGROUP_MEMORY=y
+	CONFIG_CGROUP_DEVICE=y
+	CONFIG_CGROUP_FREEZER=y
+	CONFIG_CGROUP_NET_CLASSID=y
+	CONFIG_CGROUP_PERF=y
+	CONFIG_CGROUP_RDMA=y
+	CONFIG_CGROUP_SYSFS=y
+	CONFIG_NETFILTER_XT_MATCH_CGROUP=y
+	CONFIG_NET_SCH_PRIO=y
+	CONFIG_NET_SCH_CAKE=y
+	CONFIG_OVERLAY_FS=y
+	CONFIG_HAVE_EBPF_JIT=y
+	CONFIG_PAGE_POOL=y
+	CONFIG_NET_RX_BUSY_POLL=y
+	CONFIG_XDP_SOCKETS=y
+	CONFIG_SR_IOV=y
+	CONFIG_VFIO=y
+	CONFIG_VFIO_PCI=y
+	CONFIG_ZSWAP=y
+	CONFIG_ZSMALLOC=y
+	CONFIG_CRYPTO_ZSTD=y
+"
+
+prepare() {
+	default_prepare
+	# Apply Shark-specific patches
+	if [ -d "$srcdir/shark-patches" ]; then
+		for patch in "$srcdir/shark-patches"/*.patch; do
+			patch -Np1 < "$patch"
+		done
+	fi
+}
+
+build() {
+	case "$CARCH" in
+		x86_64) 
+			cp "$srcdir/config-shark-x86_64" .config
+			;;
+		aarch64)
+			cp "$srcdir/config-shark-aarch64" .config
+			;;
+	esac
+
+	# Merge Shark configurations
+	for cfg in $_shark_configs; do
+		echo "$cfg" >> .config
+	done
+
+	make oldconfig
+	make -j$(nproc) vmlinux modules
+}
+
+package() {
+	make -j1 install INSTALL_MOD_PATH="$pkgdir" modules_install
+
+	# Install vmlinuz
+	mkdir -p "$pkgdir/boot"
+	install -Dm644 arch/$CARCH/boot/vmlinux \
+		"$pkgdir/boot/vmlinuz-shark"
+	
+	# System.map
+	install -Dm644 System.map "$pkgdir/boot/System.map-shark"
+}
+
+sha512sums="
+placeholder_sha512_for_linux_tarball
+placeholder_sha512_for_x86_64_config
+placeholder_sha512_for_aarch64_config
+placeholder_sha512_for_patches
+"

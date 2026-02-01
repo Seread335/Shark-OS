@@ -1,0 +1,45 @@
+# AppArmor profile for k3s (starter profile — tune as needed)
+# Path: /usr/bin/k3s
+# Notes: Conservative rules to start; observe denials and tighten over time.
+
+#include <tunables/global>
+#include <abstractions/base>
+
+profile /usr/bin/k3s flags=(attach_disconnected,mediate_deleted) {
+  # Executable
+  /usr/bin/k3s ixr,
+
+  # Libraries and runtime
+  /lib/** rm,
+  /lib64/** rm,
+  /usr/lib/** rm,
+
+  # Config and certs
+  /etc/** r,
+  /etc/ssl/** r,
+
+  # Runtime and data directories
+  /run/** rw,
+  /var/run/** rw,
+  /var/lib/rancher/k3s/** rwk,
+  /var/log/rancher/k3s/** rw,
+
+  # Network
+  network inet stream,
+  network inet6 stream,
+  network unix dgram stream,
+
+  # Proc/sys read access for normal operation
+  /proc/** r,
+  /sys/** r,
+
+  # Capabilities needed for k3s
+  capability net_bind_service,
+  capability setgid,
+  capability setuid,
+  capability sys_chroot,
+
+  # Be conservative: deny broad write/execute to unexpected locations
+  deny /tmp/** mrixwklx,
+  deny /** wklx,
+}

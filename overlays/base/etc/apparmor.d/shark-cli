@@ -1,0 +1,35 @@
+# AppArmor profile for Shark CLI
+#include <tunables/global>
+
+/usr/bin/shark {
+  # Inherit base rules
+  #include <abstractions/base>
+
+  # Allow read-only access to config and scripts
+  /etc/shark/** r,
+  /usr/share/shark/** r,
+  /usr/bin/shark rix,
+  /usr/lib/** mr,
+
+  # Allow execution of child scripts (partition, update, etc.)
+  /usr/share/shark/scripts/* rix,
+  /usr/bin/bash rix,
+
+  # Allow log writing
+  /var/log/shark/** rwk,
+
+  # Deny dangerous capabilities
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability mknod,
+  deny capability mount,
+  deny capability ptrace,
+
+  # Allow network (if needed)
+  network inet stream,
+  network inet6 stream,
+
+  # Default deny
+  deny /bin/dash x,
+  deny /bin/sh x,
+}

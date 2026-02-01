@@ -1,0 +1,25 @@
+name: AppArmor Tuning
+
+on:
+  workflow_dispatch:
+
+jobs:
+  collect-denials:
+    name: Collect AppArmor Denials (self-hosted required)
+    runs-on: [self-hosted, apparmor]
+    if: runner.labels && contains(join(fromJson(toJson(runner.labels)),','), 'apparmor')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Run AppArmor collection
+        run: |
+          sudo bash scripts/security/collect-apparmor-denials.sh
+
+      - name: Upload AppArmor reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: apparmor-reports
+          path: reports/apparmor
+          retention-days: 7
