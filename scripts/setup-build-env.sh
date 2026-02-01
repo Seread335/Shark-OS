@@ -99,7 +99,11 @@ EOF
     fi
     
     # Generate signing keys if they don't exist
-    if [ ! -f ~/.abuild/*.rsa ]; then
+    # Use nullglob + array check to handle globbing safely in bash
+    shopt -s nullglob
+    rsa_files=(~/.abuild/*.rsa)
+    shopt -u nullglob
+    if [ ${#rsa_files[@]} -eq 0 ]; then
         log_warn "Generating new abuild RSA key pair (this may take a moment)..."
         abuild-keygen -a -i -n 2>&1 || log_warn "Key generation may have skipped if keys already exist"
     fi

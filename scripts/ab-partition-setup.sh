@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 # ============================================================================
 #  Shark OS - A/B Partitioning Setup Script
