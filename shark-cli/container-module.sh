@@ -61,7 +61,7 @@ container_pull() {
 container_run() {
     local image="$1"
     shift
-    local args="$@"
+    local -a args=("$@")
     
     if [ -z "$image" ]; then
         echo "Usage: shark container run <image> [args...]" >&2
@@ -72,7 +72,7 @@ container_run() {
         return 1
     fi
     
-    podman run --rm $args "$image" 2>&1
+    podman run --rm "${args[@]}" "$image" 2>&1
 }
 
 container_inspect() {
