@@ -8,6 +8,7 @@ if [ -f "$SCRIPT_DIR/../lib/common.sh" ]; then
     source "$SCRIPT_DIR/../lib/common.sh"
 else
     set -eEuo pipefail
+    rc=0
     trap 'rc=$?; echo "ERROR: ${BASH_SOURCE[0]} failed at line ${LINENO} with status ${rc}" >&2; exit ${rc}' ERR
     log_info() { echo "[*] $*"; }
     log_error() { echo "[!] $*"; }
