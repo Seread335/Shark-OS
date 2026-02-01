@@ -19,8 +19,12 @@ TARGET="${1:-all}"
 
 run_test() {
   echo "[TEST] $1..."
-  eval "$2"
-  echo "[PASS] $1" >> "$LOG_FILE"
+  if bash -c -- "$2"; then
+    echo "[PASS] $1" >> "$LOG_FILE"
+  else
+    echo "[FAIL] $1" >> "$LOG_FILE"
+    return 1
+  fi
 }
 
 case "$TARGET" in
