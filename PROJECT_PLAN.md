@@ -68,8 +68,8 @@
 - AppArmor sample for `shark-cli`
 
 **Còn làm/ưu tiên tiếp theo:**
-1. **Static analysis & linting**: Bật ShellCheck trong CI, sửa cảnh báo hiện có.
-2. **AppArmor profiles**: Thêm profile cứng cho `k3s`, `podman`, `sshd`, `shark-service`.
+1. **Static analysis & linting**: Bật ShellCheck trong CI, sửa cảnh báo hiện có. (Đang: auto-fix heuristics đã áp dụng cục bộ; CI validate bị khoá do billing — chờ artifact `shellcheck-report` khi CI hoạt động.)
+2. **AppArmor profiles**: Thêm profile starter cho `k3s` và `podman`; thêm scripts để kiểm tra và thu thập denials (`check-apparmor.sh`, `collect-apparmor-denials.sh`). (Tiếp theo: chạy trên self-hosted runner labeled `apparmor` để thu dữ liệu denials và tune.)
 3. **A/B update flow**: Triển khai thực tế cho `shark update apply` + verification + watchdog rollback; viết test QEMU cho kịch bản update/rollback.
 
 **AppArmor work:**

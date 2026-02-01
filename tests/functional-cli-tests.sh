@@ -8,6 +8,8 @@ TEST_LOG="test-functional-cli.log"
 SHARK="../shark-cli/shark"
 export SHARK_CONFIG="../docs/config.example.yml"
 export SHARK_AUTH_TOKEN="testtoken"
+export SHARK_AUDIT_LOG="./test-audit.log"
+rm -f "$SHARK_AUDIT_LOG"
 
 pass=0
 fail=0
@@ -41,6 +43,14 @@ run_test "Edit config (should require auth)" $SHARK config edit <<< "testtoken"
 run_test "Update info" $SHARK update info
 run_test "Update check" $SHARK update check
 run_test "Update apply (should require auth)" $SHARK update apply <<< "testtoken"
+# Verify audit log contains update.apply
+if grep -q "update.apply" "$SHARK_AUDIT_LOG" 2>/dev/null; then
+    log_result PASS "Audit logged for update.apply"
+    pass=$((pass+1))
+else
+    log_result FAIL "Audit logged for update.apply"
+    fail=$((fail+1))
+fi
 run_test "System reboot (should require auth, expect fail if not root)" $SHARK system reboot <<< "testtoken"
 run_test "Service status (should require auth)" $SHARK service sshd status <<< "testtoken"
 run_test "Container list" $SHARK container list

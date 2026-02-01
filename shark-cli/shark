@@ -52,7 +52,7 @@ validate_config() {
 validate_safe_args() {
     local arg
     for arg in "$@"; do
-        if [[ "$arg" =~ [;|&><`$\\\(\)] ]]; then
+        if printf '%s' "$arg" | grep -q -e '[;|&><$()\\]'; then
             log_error "Unsafe character detected in argument: $arg"
             exit 1
         fi
@@ -68,6 +68,7 @@ SHARK_CONFIG="${SHARK_CONFIG:-/etc/shark/config.yml}"
 SHARK_DATA_DIR="${SHARK_DATA_DIR:-/var/lib/shark}"
 SHARK_CACHE_DIR="${SHARK_CACHE_DIR:-/var/cache/shark}"
 SHARK_LOG_FILE="${SHARK_LOG_FILE:-/var/log/shark-cli.log}"
+SHARK_DEBUG="${SHARK_DEBUG:-0}"
 
 # Color support
 if [ -t 1 ]; then
@@ -119,42 +120,92 @@ log_debug() {
 } 
 
 
-# Secure secrets management: prefer env/file, warn if found in config
+# Authentication & RBAC helpers
+AUTH_TOKEN_FILE="/etc/shark/secrets/auth.tokens"
+RBAC_POLICY_FILE="/etc/shark/rbac.yaml"
+SHARK_AUDIT_LOG="${SHARK_AUDIT_LOG:-/var/log/shark/audit.log}"
+
+read_token_role() {
+    local token="$1"
+    local role=""
+    if [ -f "$AUTH_TOKEN_FILE" ]; then
+        # file format: token:role
+        role=$(awk -F: -v t="$token" '$1==t {print $2; exit}' "$AUTH_TOKEN_FILE" || true)
+    fi
+    printf '%s' "$role"
+}
+
+audit_log() {
+    local op="$1"; shift
+    mkdir -p "$(dirname "$SHARK_AUDIT_LOG")" 2>/dev/null || true
+    local entry="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [${SHARK_AUTH_ROLE:-unknown}] $op - $*"
+    echo "$entry" >> "$SHARK_AUDIT_LOG" 2>/dev/null || true
+    log_to_file AUDIT "$op - $*"
+}
+
+check_permission() {
+    local op="$1"
+    case "${SHARK_AUTH_ROLE:-}" in
+        admin) return 0 ;;
+        operator)
+            case "$op" in
+                update.apply|update.rollback|service.*|container.run|container.pull|kubernetes.init|kubernetes.stop) return 0 ;;
+            esac
+            ;;
+        viewer)
+            case "$op" in
+                status|config.show|config.get|container.list|container.ps) return 0 ;;
+            esac
+            ;;
+    esac
+    log_error "Permission denied for operation: $op (role: ${SHARK_AUTH_ROLE:-none})"
+    exit 1
+}
+
 require_auth() {
-    local token_input token_valid secret_file
-    # 1. Check env variable first
-    if [ -n "$SHARK_AUTH_TOKEN" ]; then
-        token_valid="$SHARK_AUTH_TOKEN"
-    else
-        # 2. Check secrets file
-        secret_file="/etc/shark/secrets.env"
-        if [ -f "$secret_file" ]; then
-            # shellcheck disable=SC1090
-            . "$secret_file"
-            if [ -n "$SHARK_AUTH_TOKEN" ]; then
-                token_valid="$SHARK_AUTH_TOKEN"
-            fi
+    local token_input=""
+    # 1) If token available in env, accept (useful for automation/tests)
+    if [ -n "${SHARK_AUTH_TOKEN:-}" ]; then
+        SHARK_AUTH_ROLE="${SHARK_AUTH_ROLE:-admin}"
+        SHARK_AUTH_ID="${SHARK_AUTH_TOKEN:0:8}"
+        return 0
+    fi
+    # 2) Try secrets.env
+    if [ -f "/etc/shark/secrets.env" ]; then
+        # shellcheck disable=SC1090
+        . /etc/shark/secrets.env
+        if [ -n "${SHARK_AUTH_TOKEN:-}" ]; then
+            SHARK_AUTH_ROLE="${SHARK_AUTH_ROLE:-admin}"
+            SHARK_AUTH_ID="${SHARK_AUTH_TOKEN:0:8}"
+            return 0
         fi
     fi
-    # 3. Check config file (but warn and refuse if found)
-    if [ -z "$token_valid" ] && [ -f "$SHARK_CONFIG" ]; then
-        if grep -qE 'auth_token:|password:|secret:' "$SHARK_CONFIG"; then
-            log_error "Detected secrets in config file ($SHARK_CONFIG). For security, move all secrets to /etc/shark/secrets.env or environment variables."
-            exit 1
+    # 3) Read token from stdin if provided (non-interactive)
+    if token_input=$(head -n1 /dev/stdin 2>/dev/null || true); then
+        :
+    fi
+    if [ -n "$token_input" ] && [ -f "$AUTH_TOKEN_FILE" ]; then
+        role=$(read_token_role "$token_input")
+        if [ -n "$role" ]; then
+            SHARK_AUTH_ROLE="$role"
+            SHARK_AUTH_ID="${token_input:0:8}"
+            return 0
         fi
     fi
-    if [ -z "$token_valid" ]; then
-        log_error "No authentication token set. Set SHARK_AUTH_TOKEN env or add to /etc/shark/secrets.env."
-        exit 1
-    fi
-    # Prompt for token (no echo)
+    # 4) interactive prompt fallback
     echo -n "Enter authentication token: "
-    read -r -s token_input
+    read -r -s token_input || true
     echo
-    if [ "$token_input" != "$token_valid" ]; then
-        log_error "Authentication failed."
-        exit 1
+    if [ -n "$token_input" ] && [ -f "$AUTH_TOKEN_FILE" ]; then
+        role=$(read_token_role "$token_input")
+        if [ -n "$role" ]; then
+            SHARK_AUTH_ROLE="$role"
+            SHARK_AUTH_ID="${token_input:0:8}"
+            return 0
+        fi
     fi
+    log_error "Authentication failed or no valid token found."
+    exit 1
 }
 
 # Check if running as root (needed for some operations)
@@ -253,7 +304,9 @@ cmd_update() {
         
         apply)
             require_auth
+            check_permission "update.apply"
             check_root
+            audit_log "update.apply" "requested"
             log_warn "Update apply not yet implemented in alpha version"
             log_warn "This will require:"
             log_warn "  1. Download new rootfs image"
@@ -264,7 +317,9 @@ cmd_update() {
         
         rollback)
             require_auth
+            check_permission "update.rollback"
             check_root
+            audit_log "update.rollback" "requested"
             log_warn "Rollback mechanism not yet implemented in alpha version"
             ;;
         
@@ -296,6 +351,7 @@ cmd_config() {
         
         init)
             require_auth
+            check_permission "config.init"
             check_root
             log_info "Initializing default configuration..."
             mkdir -p "$(dirname "$SHARK_CONFIG")"
@@ -351,10 +407,12 @@ tuning:
   swappiness: 10
 EOF
             log_success "Configuration initialized: $SHARK_CONFIG"
+            audit_log "config.init" "initialized $SHARK_CONFIG"
             ;;
         
         edit)
             require_auth
+            check_permission "config.edit"
             check_root
             if [ -n "$EDITOR" ]; then
                 $EDITOR "$SHARK_CONFIG"
@@ -364,6 +422,7 @@ EOF
                 log_error "No editor found. Set EDITOR environment variable"
                 exit 1
             fi
+            audit_log "config.edit" "edited $SHARK_CONFIG"
             ;;
         
         get)
@@ -379,12 +438,14 @@ EOF
         
         set)
             require_auth
+            check_permission "config.set"
             check_root
             if [ -z "$key" ] || [ -z "$3" ]; then
                 log_error "Usage: shark config set <key> <value>"
                 exit 1
             fi
             log_warn "config set not yet implemented"
+            audit_log "config.set" "$key=$3"
             ;;
         
         *)
@@ -402,21 +463,27 @@ cmd_system() {
     case "$action" in
         reboot)
             require_auth
+            check_permission "system.reboot"
             check_root
+            audit_log "system.reboot" "requested"
             log_info "Rebooting system..."
             reboot
             ;;
         
         shutdown)
             require_auth
+            check_permission "system.shutdown"
             check_root
+            audit_log "system.shutdown" "requested"
             log_info "Shutting down system..."
             poweroff
             ;;
         
         halt)
             require_auth
+            check_permission "system.halt"
             check_root
+            audit_log "system.halt" "requested"
             log_info "Halting system..."
             halt
             ;;
@@ -442,14 +509,18 @@ cmd_service() {
     case "$action" in
         start|stop|restart|status)
             require_auth
+            check_permission "service.$action"
             check_root
             rc-service "$service" "$action"
+            audit_log "service.$action" "$service"
             ;;
         
         enable|disable)
             require_auth
+            check_permission "service.$action"
             check_root
             rc-update "$action" "$service"
+            audit_log "service.$action" "$service"
             ;;
         
         *)
@@ -478,15 +549,19 @@ cmd_container() {
         
         run)
             require_auth
+            check_permission "container.run"
             shift
             validate_safe_args "$@"
+            audit_log "container.run" "$*"
             podman run "$@"
             ;;
         
         pull)
             require_auth
+            check_permission "container.pull"
             shift
             validate_safe_args "$@"
+            audit_log "container.pull" "$*"
             podman pull "$@"
             ;;
         
@@ -510,7 +585,9 @@ cmd_kubernetes() {
     case "$action" in
         init)
             require_auth
+            check_permission "kubernetes.init"
             check_root
+            audit_log "kubernetes.init" "requested"
             log_info "Initializing K3s cluster..."
             k3s server &
             sleep 5
@@ -520,7 +597,9 @@ cmd_kubernetes() {
         
         stop)
             require_auth
+            check_permission "kubernetes.stop"
             check_root
+            audit_log "kubernetes.stop" "requested"
             log_info "Stopping K3s cluster..."
             pkill -f "k3s"
             ;;

@@ -48,7 +48,19 @@ while IFS= read -r -d '' f; do
     fi
   fi
 done < <(find . -name '*.sh' -type f -print0)
-
+# 4) Quote simple unquoted variable tokens in argument lists (VERY conservative)
+# Matches: space + $VAR + space or end-of-line. Avoid touching complex expressions, arrays, or parameter expansions.
+while IFS= read -r -d '' f; do
+  if grep -Eq "(^|[[:space:]])\$[A-Za-z0-9_]+($|[[:space:]])" "$f"; then
+    echo "Found simple unquoted var tokens in $f"
+    if [ $APPLY -eq 1 ]; then
+      # Add spaces around line to ensure pattern match; replace ' $VAR ' -> ' "$VAR" '
+      sed -E -i "s/([[:space:]])\$([A-Za-z0-9_]+)([[:space:]])/ \"\\$\\2\" /g" "$f" || true
+      # Also handle EOL case: ' $VAR$' -> ' "$VAR"'
+      sed -E -i "s/([[:space:]])\$([A-Za-z0-9_]+)\$/ \"\\$\\2\"/g" "$f" || true
+    fi
+  fi
+done < <(find . -name '*.sh' -type f -print0)
 # Warn user to run shellcheck and review diffs
 if [ $APPLY -eq 1 ]; then
   echo "Applied heuristic fixes. Please run 'git diff' and 'bash scripts/ci/run-shellcheck.sh' to confirm fixes." 
