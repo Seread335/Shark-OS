@@ -173,9 +173,9 @@ pod_exec() {
     local pod="$1"
     local namespace="${2:-default}"
     shift 2
-    local cmd="$@"
+    local -a cmd=("$@")
     
-    if [ -z "$pod" ] || [ -z "$cmd" ]; then
+    if [ -z "$pod" ] || [ ${#cmd[@]} -eq 0 ]; then
         echo "Usage: shark kubernetes exec <pod> [namespace] <command...>" >&2
         return 1
     fi
@@ -184,7 +184,7 @@ pod_exec() {
         return 1
     fi
     
-    kubectl exec -n "$namespace" -it "$pod" -- $cmd 2>&1
+    kubectl exec -n "$namespace" -it "$pod" -- "${cmd[@]}" 2>&1
 }
 
 pod_delete() {
