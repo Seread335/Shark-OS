@@ -564,7 +564,7 @@ main() {
         
         create)
             if [ -z "$2" ]; then
-                log_error "Usage: $(basename $0) create <device>"
+                log_error "Usage: $(basename "$0") create <device>"
                 exit 1
             fi
             create_partition_table "$2"
@@ -573,7 +573,7 @@ main() {
         
         format)
             if [ -z "$2" ]; then
-                log_error "Usage: $(basename $0) format <device>"
+                log_error "Usage: $(basename "$0") format <device>"
                 exit 1
             fi
             format_partitions "$2"
@@ -581,7 +581,7 @@ main() {
         
         grub)
             if [ -z "$2" ] || [ -z "$3" ]; then
-                log_error "Usage: $(basename $0) grub <device> <mount_point>"
+                log_error "Usage: $(basename "$0") grub <device> <mount_point>"
                 exit 1
             fi
             setup_grub "$2" "$3"
@@ -595,7 +595,7 @@ main() {
             cat << EOF
 Shark OS A/B Partitioning Setup Tool v${VERSION}
 
-Usage: $(basename $0) <command> [options]
+Usage: $(basename "$0") <command> [options]
 
 Commands:
   layout                           Show disk layout diagram
@@ -605,10 +605,10 @@ Commands:
   switcher [target_dir]           Create root partition switcher tool
 
 Examples:
-  $(basename $0) layout                              # Show partition layout
-  $(basename $0) create /dev/sda                     # Setup on /dev/sda
-  $(basename $0) grub /dev/sda /mnt                  # Install GRUB
-  $(basename $0) switcher /usr/local/sbin            # Install switcher tool
+  $(basename "$0") layout                              # Show partition layout
+  $(basename "$0") create /dev/sda                     # Setup on /dev/sda
+  $(basename "$0") grub /dev/sda /mnt                  # Install GRUB
+  $(basename "$0") switcher /usr/local/sbin            # Install switcher tool
 
 EOF
             exit 0
