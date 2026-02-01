@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -eEuo pipefail
 trap 'log_error "Lỗi không mong muốn tại dòng $LINENO. Script dừng."; exit 1' ERR
 
