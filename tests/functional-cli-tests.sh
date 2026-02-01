@@ -76,5 +76,5 @@ else
 fi
 
 # --- Summary ---
-echo "\nFunctional CLI tests: $pass passed, $fail failed. Log: $TEST_LOG"
+printf '\nFunctional CLI tests: %d passed, %d failed. Log: %s\n' "$pass" "$fail" "$TEST_LOG"
 exit $fail
